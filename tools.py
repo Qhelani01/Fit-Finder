@@ -248,10 +248,11 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     brand = f"Brand: {new_item['brand']}\n" if new_item.get("brand") else ""
     prompt = (
-        "Write a caption someone would actually post about a thrift find.\n\n"
+        "Write a caption someone would actually post about a thrift find they "
+        "just bought and are wearing.\n\n"
         f"Item: {new_item['title']}\n"
-        f"Price: ${new_item['price']:.2f}\n"
-        f"Platform: {new_item['platform']}\n"
+        f"Price they paid: ${new_item['price']:.2f}\n"
+        f"Where they bought it: {new_item['platform']}\n"
         f"Size: {new_item['size']}\n"
         f"{brand}"
         f"How they're wearing it: {outfit}\n\n"

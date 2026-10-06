@@ -13,7 +13,9 @@ Build and test your three tools in `tools.py` first. Then come here.
     python agent.py          runs both example paths below
 """
 
-import config
+import re
+
+import config  # noqa: F401
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
@@ -41,6 +43,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
         "search_results": [],        # everything search_listings returned
         "selected_item": None,       # the one you chose — goes into suggest_outfit
         "wardrobe": wardrobe,        # the user's wardrobe
+        "outfit_input_item": None,   # the item suggest_outfit actually received (criterion 3)
         "outfit_suggestion": None,   # what suggest_outfit returned
         "fit_card": None,            # what create_fit_card returned
         "error": None,               # set when the run ended early
@@ -106,10 +109,97 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         than a stack trace. The import is already at the top of this file.
     """
     session = new_session(query, wardrobe)
+    session["parsed"] = parse_query(query)
 
-    # TODO: delete these two lines and build the loop.
-    session["error"] = "The planning loop isn't built yet — see the TODO in agent.py."
+    next_step = "search"
+    count = 0
+    while next_step != "done":
+        count += 1
+        trace.check_iterations(count)
+
+        if next_step == "search":
+            p = session["parsed"]
+            session["search_results"] = search_listings(
+                p["description"], p["size"], p["max_price"]
+            )
+            # THE BRANCH: nothing found means stop here, before suggest_outfit.
+            if not session["search_results"]:
+                session["error"] = _no_results_message(p)
+                next_step = "done"
+            else:
+                session["selected_item"] = session["search_results"][0]
+                next_step = "suggest"
+
+        elif next_step == "suggest":
+            item = session["selected_item"]
+            session["outfit_input_item"] = item
+            session["outfit_suggestion"] = suggest_outfit(item, session["wardrobe"])
+            next_step = "fit_card"
+
+        elif next_step == "fit_card":
+            session["fit_card"] = create_fit_card(
+                session["outfit_suggestion"], session["selected_item"]
+            )
+            next_step = "done"
+
     return session
+
+
+# ── query parsing ─────────────────────────────────────────────────────────────
+
+_PRICE_PATTERNS = [
+    r"(?:under|below|less than|max|up to|<=?)\s*\$?\s*(\d+(?:\.\d+)?)",
+    r"\$\s*(\d+(?:\.\d+)?)\s*(?:or less|max|and under)",
+]
+_SIZE_PATTERN = r"\bsize\s+([a-z0-9./]+(?:\s*/\s*[a-z0-9.]+)?)"
+_FILLER = r"\b(?:i'?m|i am|looking for|i want|i need|find me|show me|something|please)\b"
+
+
+def parse_query(query: str) -> dict:
+    """
+    Pull a description, size and max_price out of a plain-language query, by regex.
+
+    'vintage graphic tee under $30, size M'
+        → {'description': 'vintage graphic tee', 'size': 'M', 'max_price': 30.0}
+    """
+    text = query.lower()
+
+    max_price = None
+    for pattern in _PRICE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            max_price = float(match.group(1))
+            text = text[: match.start()] + " " + text[match.end():]
+            break
+
+    size = None
+    match = re.search(_SIZE_PATTERN, text)
+    if match:
+        size = match.group(1).upper()
+        text = text[: match.start()] + " " + text[match.end():]
+
+    text = re.sub(_FILLER, " ", text)
+    description = " ".join(re.sub(r"[^a-z0-9'\- ]", " ", text).split())
+    return {"description": description, "size": size, "max_price": max_price}
+
+
+def _no_results_message(parsed: dict) -> str:
+    """Say what was searched and which part of it to loosen — not just 'No results'."""
+    searched = f"'{parsed['description']}'" if parsed["description"] else "an empty description"
+    filters, tips = [], []
+    if parsed["size"]:
+        filters.append(f"size {parsed['size']}")
+        tips.append("drop the size or try a neighbouring one (e.g. S/M, M/L)")
+    if parsed["max_price"] is not None:
+        filters.append(f"under ${parsed['max_price']:g}")
+        tips.append(f"raise the price limit above ${parsed['max_price']:g}")
+    tips.append("use fewer or more common words (e.g. 'graphic tee', 'denim jacket', 'boots')")
+
+    where = f" ({', '.join(filters)})" if filters else ""
+    return (
+        f"No listings matched {searched}{where}. "
+        f"To find something, try: {'; '.join(tips)}."
+    )
 
 
 # ── running it directly ───────────────────────────────────────────────────────
