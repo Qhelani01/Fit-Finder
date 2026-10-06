@@ -59,24 +59,25 @@
 
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Filters `data/listings.json` by size and price ceiling, then ranks what's left by how many of the description's keywords appear in each listing (title, description, style tags, category, colors, brand), with title and style-tag hits counting double.
+- **Inputs:** `description` (str) — keywords like `"vintage graphic tee"`; `size` (str or None) — `None` skips the size filter; `max_price` (float or None) — inclusive ceiling, `None` skips the price filter.
+- **Returns:** A `list[dict]` of at most `config.SEARCH_RESULT_LIMIT` (10) listing dicts, best match first (ties go to the cheaper item). Each dict is the unmodified listing: `id`, `title`, `description`, `category`, `style_tags` (list), `size`, `condition`, `price` (float), `colors` (list), `brand` (str or None), `platform`.
+  - **Size match rule:** case-insensitive, by whole token, not substring. The listing's size is split on `/`, spaces and parentheses, and every token of the requested size must appear among the listing's tokens. So `M` matches `S/M` and `M/L`, `8` matches `US 8`, but `S` does **not** match `US 9` and `L` does **not** match `XL` or `W30 L30`. Listings whose size starts with `One Size` match any requested size.
+- **When it has nothing:** An empty list `[]` — never `None`, never an exception. That includes a description with no usable keywords, because every listing scores zero.
 
 ### `suggest_outfit`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for one or two outfits built around the new item, naming specific pieces from the user's wardrobe.
+- **Inputs:** `new_item` (dict) — one listing dict, as returned by `search_listings`; `wardrobe` (dict) — `{"items": [wardrobe item dicts]}` with `name`, `category`, `colors`, `style_tags`, `notes`.
+- **Returns:** A non-empty `str` of plain-text outfit suggestions, each naming the new item plus the wardrobe pieces (by their `name`) that go with it.
+- **When it has nothing:** If `wardrobe["items"]` is empty or missing, it does not fail. It returns a non-empty `str` of general styling advice for the item (what kinds of pieces pair with it), with no references to an owned wardrobe.
 
 ### `create_fit_card`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Asks the model for a short social-media caption about the find and the outfit.
+- **Inputs:** `outfit` (str) — the string `suggest_outfit` returned; `new_item` (dict) — the same listing dict that went into `suggest_outfit`.
+- **Returns:** A `str` caption of two to four sentences that mentions the item's title, price and platform once each and describes the outfit's vibe. Temperature is 0.9, so wording varies between runs.
+- **When it has nothing:** If `outfit` is empty or only whitespace, it does not call the model. It returns the string `"Can't write a fit card for <title>: no outfit suggestion was provided."`
 
 ---
 
@@ -93,13 +94,13 @@
      The grader checks your code against what you claim here, so the file and
      function have to be real. -->
 
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, put a message in `session["error"]` that names what was searched for and which filter to loosen (raise the price, drop the size, use fewer or different words), then return the session without calling `suggest_outfit` or `create_fit_card`. Otherwise, put the first result in `session["selected_item"]`, call `suggest_outfit` with it, then call `create_fit_card`.
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+**How the query is parsed:** Regex, no model call. A price ceiling comes from phrases like `under $30`, `below 30`, `max $30`, `< $30` or `$30 or less`. A size comes from `size <X>` (e.g. `size M`, `size 8`, `size W30`). Whatever is left, minus filler words like "looking for", becomes the description.
 
-**What moves through the session:** <!-- which fields, in what order -->
+**What moves through the session:** `query` → `parsed` (`description`, `size`, `max_price`) → `search_results` → `selected_item` (read back out of the session for both later calls) → `outfit_suggestion` (read back out for the fit card) → `fit_card`. `error` is set only on the early-stop path, and then `selected_item`, `outfit_suggestion` and `fit_card` stay `None`.
 
 ---
 
