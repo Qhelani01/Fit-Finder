@@ -29,24 +29,40 @@ SCENARIOS = [
         "criterion": 2,
     },
     {
+        # Criterion 3 — state. A different item from criterion 1 (lst_004, $75,
+        # depop, branded), with a size filter. The trace records selected_item's
+        # id/price/platform at the search step and what suggest_outfit received.
+        "name": "selected item is the item passed on",
+        "query": "90s track jacket in size M",
+        "wardrobe": "example",
+        "criterion": 3,
+    },
+    {
+        # Criterion 4 — fit card. The same item (lst_007, Wrangler, $42,
+        # poshmark) five times, so the only thing that varies is the model.
+        # It has a brand, so a wrong-brand claim is checkable.
+        "name": "fit card states title, price, platform",
+        "query": "denim jacket under $50",
+        "wardrobe": "example",
+        "criterion": 4,
+    },
+    {
+        # Criterion 5 — price ceiling. Chosen because 3 listings match the
+        # keywords but cost more than $35, so the filter has something to drop.
+        # "vintage graphic tee under $30" has no over-limit matches and would
+        # pass even with the filter deleted.
+        "name": "nothing returned over max_price",
+        "query": "vintage jacket under $35",
+        "wardrobe": "example",
+        "criterion": 5,
+    },
+    {
         # A user with nothing saved. One of unit 4's three failure modes.
         "name": "empty wardrobe",
         "query": "denim jacket under $50",
         "wardrobe": "empty",
         "criterion": None,
     },
-    # TODO: add what your criteria 3, 4 and 5 need.
-    #
-    # Set "criterion" to the number in criteria.md that the scenario tests.
-    # "criterion": None means a diagnostic run — useful to have, but it isn't
-    # one of your five, and run_eval.py marks it as such in the table.
-    #
-    # For a state criterion, any normal query works — what you're checking is
-    # what ends up in the session, not what the user typed.
-    #
-    # For a fit-card criterion, you probably want the SAME query listed more
-    # than once, or several different items, depending on what your criterion
-    # actually says.
 ]
 
 WARDROBES = ("example", "empty")
