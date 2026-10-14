@@ -19,7 +19,7 @@ import config  # noqa: F401
 import trace
 from tools import suggest_outfit, create_fit_card
 from generate import ModelUnavailable
-from mcp_client import call_tool
+from mcp_client import call_tool, MCPError
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -111,6 +111,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     session = new_session(query, wardrobe)
     session["parsed"] = parse_query(query)
+    trace.step("parse_query", inputs=repr(query), returned=_kv(session["parsed"]))
 
     next_step = "search"
     count = 0
@@ -120,33 +121,84 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
         if next_step == "search":
             p = session["parsed"]
+            args = {"description": p["description"], "size": p["size"], "max_price": p["max_price"]}
             # search_listings runs behind MCP now (mcp_server.py), not as a direct call.
-            session["search_results"] = call_tool("search_listings", {
-                "description": p["description"],
-                "size": p["size"],
-                "max_price": p["max_price"],
-            })
+            try:
+                session["search_results"] = call_tool("search_listings", args)
+            except MCPError as exc:
+                trace.step("search_listings (via MCP)", inputs=_kv(args), returned=f"MCPError: {exc}",
+                           note="branch: search server unreachable, stopping")
+                session["error"] = (
+                    "The listings search couldn't be reached, so nothing was searched. "
+                    "Try again in a moment; if it keeps happening, run "
+                    "`python mcp_client.py` to check the search server starts."
+                )
+                return session
+
             # THE BRANCH: nothing found means stop here, before suggest_outfit.
             if not session["search_results"]:
                 session["error"] = _no_results_message(p)
                 next_step = "done"
+                note = "branch: empty → stop, suggest_outfit NOT called"
             else:
                 session["selected_item"] = session["search_results"][0]
                 next_step = "suggest"
+                prices = [r["price"] for r in session["search_results"]]
+                note = (f"branch: {len(prices)} results (prices ${min(prices):g}–${max(prices):g}) "
+                        f"→ selected_item = {session['selected_item']['id']}")
+            trace.step("search_listings (via MCP)", inputs=_kv(args),
+                       returned=session["search_results"], note=note)
 
         elif next_step == "suggest":
             item = session["selected_item"]
             session["outfit_input_item"] = item
-            session["outfit_suggestion"] = suggest_outfit(item, session["wardrobe"])
+            n_owned = len((session["wardrobe"] or {}).get("items") or [])
+            try:
+                session["outfit_suggestion"] = suggest_outfit(item, session["wardrobe"])
+            except ModelUnavailable as exc:
+                return _model_down(session, "suggest_outfit", exc)
+            trace.step("suggest_outfit",
+                       inputs=f"new_item={item['id']} {item['title']!r} (${item['price']:g}, "
+                              f"{item['platform']}), wardrobe={n_owned} items",
+                       returned=session["outfit_suggestion"],
+                       note="empty wardrobe → general advice" if n_owned == 0 else "")
             next_step = "fit_card"
 
         elif next_step == "fit_card":
-            session["fit_card"] = create_fit_card(
-                session["outfit_suggestion"], session["selected_item"]
-            )
+            try:
+                session["fit_card"] = create_fit_card(
+                    session["outfit_suggestion"], session["selected_item"]
+                )
+            except ModelUnavailable as exc:
+                return _model_down(session, "create_fit_card", exc)
+            trace.step("create_fit_card",
+                       inputs=f"outfit=<{len(session['outfit_suggestion'])} chars>, "
+                              f"new_item={session['selected_item']['id']}",
+                       returned=session["fit_card"], note="done")
             next_step = "done"
 
     return session
+
+
+def _model_down(session: dict, tool: str, exc: Exception) -> dict:
+    """
+    The model couldn't be reached. Stop, keep what the search already found, and
+    tell the user what broke and what to try — instead of a stack trace.
+    """
+    item = session["selected_item"]
+    trace.step(tool, returned=f"ModelUnavailable: {exc}", note="model unreachable, stopping")
+    session["error"] = (
+        f"Found {item['title']} — ${item['price']:.2f} on {item['platform']}, but the styling "
+        f"model couldn't be reached, so there's no outfit or fit card this time. "
+        f"{exc} The search itself worked, so once that's sorted, run the same "
+        f"request again."
+    )
+    return session
+
+
+def _kv(d: dict) -> str:
+    """Show a small dict in full in the trace (trace.py shortens dicts to their keys)."""
+    return ", ".join(f"{k}={v!r}" for k, v in d.items())
 
 
 # ── query parsing ─────────────────────────────────────────────────────────────
