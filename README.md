@@ -395,34 +395,64 @@ The model-unavailable handler then fired for real, without me forcing it. The pr
 
      `python run_eval.py --label after` -->
 
-**What I changed:**
+**What I changed:** One thing, in `generate.py::generate`, the single function both model-calling tools go through. A `503 UNAVAILABLE` / "overloaded" error is now treated as temporary, the same way a 429 already was: wait with exponential backoff (1, 2, 4, 8 s) and retry, up to `MAX_RETRIES` (5) attempts. If the last attempt still gets a 503, it raises `ModelUnavailable` as before, so the Milestone 2 handler still catches it. Every retry prints `[model overloaded (503)] … Waiting Ns`, so retries show up in the run output and can be counted. A bad key (401/400) still fails on the first attempt. I checked: the bad-key run still returns its message in 1.3 s.
 
-**Which failure it was meant to fix:**
+**Which failure it was meant to fix:** The one the diagnosis found behind 7 of the 8 FAIL cells. A single 503 from an overloaded model ended the run, because the adapter never retried it. I picked it over rewriting the fit-card prompt because it accounted for 7 misses instead of 1, across three criteria.
 
 ### Run Log — After
 
+Full log: [results/run_2026-10-13_2227_after.md](results/run_2026-10-13_2227_after.md) — `python run_eval.py --label after`, same scenarios, same 5 tries, cache off, temperature 0.9. Nothing else changed between the two runs.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 2. Impossible query stops before tool 2 | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. `selected_item` = item passed to `suggest_outfit` | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 4. Fit card: 2–4 sentences, title, exact price, platform, nothing contradicted | 4 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 5. Nothing returned over `max_price` | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Did it help, and how do I know:**
+**Before and after, side by side**
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+| Criterion | Target | Before | After |
+|---|---|---|---|
+| 1 | 4 of 5 | MET (4/5) | MET (5/5) |
+| 2 | 5 of 5 | MET (5/5) | MET (5/5) |
+| 3 | 5 of 5 | **MISSED (2/5)** | MET (5/5) |
+| 4 | 4 of 5 | **MISSED (2/5)** | MET (5/5) |
+| 5 | 5 of 5 | MET (5/5) | MET (5/5) |
+| Tries that ended on a 503 (all scenarios) | — | 14 of 30 | 0 of 30 |
 
+Real output from the after run, criterion 3 try 1 (the evidence that was missing before). Trace from `agent.py::run_agent`:
+```
+[2] search_listings (via MCP)
+      →    branch: 5 results (prices $14–$75) → selected_item = lst_004
+[3] suggest_outfit
+      in:  new_item=lst_004 '90s Track Jacket — Navy/White Stripe' ($45, poshmark), wardrobe=10 items
+```
 
+Criterion 4, try 2, from `tools.py::create_fit_card`, 3 sentences:
+```
+Scored this Wrangler denim jacket on Poshmark for $42.00 and I'm already obsessed with the cropped fit. I love how it anchors a balanced double-denim streetwear look with a white ribbed tank and dark wash jeans, but it also works layered over an oversized grey crewneck and khaki trousers for a relaxed, minimal vibe. Finished both outfits with chunky white sneakers and my go-to black crossbody bag.
+```
+
+**Did it help, and how do I know:** Yes, for the failure it targeted. Tries ending on a 503 went from 14 of 30 to 0 of 30, and both misses became MET. The obvious objection is that the model was just less busy the second time. It wasn't: the after run printed **29** `[model overloaded (503)]` retries over 79 call attempts (37%), against 14 fatal 503s in 43 calls (33%) before. The load was about the same, and the retry absorbed every one.
+
+Three honest limits on that result:
+- **Criterion 4 is partly luck.** The fix removed the two 503 failures. The third failure, a one-sentence card, is a prompt problem the fix doesn't touch. It didn't happen in these five tries, but it happened **twice** in the diagnostic empty-wardrobe scenario of the same after run (tries 1 and 3, e.g. *"Scored this vintage Wrangler light-wash denim jacket on Poshmark for just $42.00, and it instantly pulled together my high-waisted black cargo pants, fitted white ribbed tank, and chunky sneakers for the ultimate effortless streetwear vibe. 👖✨"*). Across all 25 cards the after run produced, 2 were one sentence.
+- **Criterion 3 passing is still indirect.** It passes now because `suggest_outfit` stopped failing, so its inputs got logged. The error path in `_model_down` still doesn't log `new_item`, so a run that gives up after 5 attempts would be unverifiable again.
+- **It costs time and calls.** The after run used 79 call attempts against 43, and a busy model now makes a user wait up to ~15 s instead of getting an error at once. That's the right trade for a request that would otherwise fail, but it is a trade.
 
 ---
 
 ## What's Still Broken
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
+Every criterion is MET in the after run, so nothing below is a *missed criterion*. These are the problems the test exposed that the targets don't catch, which is where I'd go next. Two of my targets were also easy: criteria 3 and 5 test deterministic code and can only catch a regression. The one I'd tighten is criterion 4, from "4 of 5" to "5 of 5 across all fit cards in the run log, including the diagnostic scenario", which would have caught the one-sentence cards above.
+
+- **One-sentence fit cards (criterion 4's prompt problem).** 1 of 3 cards in the before run's criterion-4 scenario and 2 of 25 in the after run broke the 2–4 sentence rule. What I'd do: count sentences in `create_fit_card` after the call and regenerate once if there are fewer than 2, rather than just asking for it in the prompt. I stopped because the brief allows one change per unit, and the 503 retry fixed seven times as many failures.
+- **Search ranks the wrong kind of item first.** `vintage jacket under $35` and `leather boots under $60` both select a *Leather Belt*. Per-keyword scoring lets a strong match on an adjective ("vintage", "leather") beat a weak match on the noun the user actually wants. What I'd do: add a criterion ("the selected item's category or title contains the noun in the query, 5 of 5") and weight the last keyword of the description higher in `tools.py::search_listings`. I stopped because no criterion of mine measures it, so I found it but couldn't score a fix.
+- **The error path loses the evidence.** `agent.py::_model_down` doesn't log the `new_item` that went into the failed tool, so a run that still fails after 5 retries can't be scored on criterion 3. It's a one-line fix (pass `inputs=` to that `trace.step`). I left it because it would be a second change.
+- **The model-down message shows the provider's raw JSON** (`{'error': {'code': 503, ...}}`) to the user, because `generate.py::_explain` has no friendly case for a 503. The user still knows what broke and what to do, but the JSON is noise. I'd add a 503 branch to `_explain` ("the model is busy right now, try again in a minute").
+- **MCP adds about half a second per search**, because `mcp_client.call_tool` starts a fresh server process every call. That's fine for one search per run, but I'd hold one connection open if the agent ever searched more than once.
 
 
 
