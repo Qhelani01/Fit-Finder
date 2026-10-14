@@ -197,19 +197,69 @@ Scored these vintage Levi's 501 jeans on Depop for $38.00 and they honestly fit 
      `python run_eval.py --label before` runs everything and writes the table
      into results/. Paste it here and fill in the verdicts. -->
 
+Full log: [results/run_2026-10-13_2158_before.md](results/run_2026-10-13_2158_before.md) — `python run_eval.py --label before`, 5 tries per scenario, cache off, temperature 0.9, 43 model calls.
+
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools (`vintage graphic tee under $30`) | 4 of 5 | PASS | PASS | FAIL | PASS | PASS | MET (4/5) |
+| 2. Impossible query stops before tool 2 (`designer ballgown size XXS under $5`) | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. `selected_item` = item passed to `suggest_outfit` (`90s track jacket in size M`) | 5 of 5 | FAIL | FAIL | PASS | FAIL | PASS | MISSED (2/5) |
+| 4. Fit card: 2–4 sentences, title, exact price, platform, nothing contradicted (`denim jacket under $50`) | 4 of 5 | PASS | PASS | FAIL | FAIL | FAIL | MISSED (2/5) |
+| 5. Nothing returned over `max_price` (`vintage jacket under $35`) | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+Every early stop in this run was the same error. 14 of the 43 model calls came back `503 UNAVAILABLE — This model is currently experiencing high demand`: 7 in `suggest_outfit`, 7 in `create_fit_card`. That includes 3 of the 5 diagnostic empty-wardrobe tries, which aren't in the table.
 
+**Real output, one try per criterion.** All runs: `run_eval.py::run_once` → `agent.py::run_agent`; search via `mcp_server.py::search_listings`; outfit by `tools.py::suggest_outfit`; card by `tools.py::create_fit_card`.
+
+Criterion 1, try 3 (the FAIL). `agent.py::_model_down` produced the stop:
+```
+- stopped early: yes — Found Y2K Baby Tee — Butterfly Print — $18.00 on depop, but the styling model couldn't be reached, so there's no outfit or fit card this time. Couldn't reach the model: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} The search itself worked, so once that's sorted, run the same request again.
+- selected_item: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+- search_results: 10
 ```
 
+Criterion 2, try 1. `agent.py::_no_results_message` produced the stop:
+```
+- stopped early: yes — No listings matched 'designer ballgown' (size XXS, under $5). To find something, try: drop the size or try a neighbouring one (e.g. S/M, M/L); raise the price limit above $5; use fewer or more common words (e.g. 'graphic tee', 'denim jacket', 'boots').
+- selected_item: (none)
+- search_results: 0
+[2] search_listings (via MCP)
+      in:  description='designer ballgown', size='XXS', max_price=5.0
+      out: [] (empty)
+      →    branch: empty → stop, suggest_outfit NOT called
+```
+
+Criterion 3: try 3 (PASS) next to try 1 (FAIL, inputs never logged). Trace from `agent.py::run_agent`:
+```
+try 3
+[2] search_listings (via MCP)
+      →    branch: 5 results (prices $14–$75) → selected_item = lst_004
+[3] suggest_outfit
+      in:  new_item=lst_004 '90s Track Jacket — Navy/White Stripe' ($45, poshmark), wardrobe=10 items
+[4] create_fit_card
+      out: ModelUnavailable: Couldn't reach the model: 503 UNAVAILABLE. ...
+
+try 1
+[2] search_listings (via MCP)
+      →    branch: 5 results (prices $14–$75) → selected_item = lst_004
+[3] suggest_outfit
+      out: ModelUnavailable: Couldn't reach the model: 503 UNAVAILABLE. ...
+      →    model unreachable, stopping
+```
+
+Criterion 4: tries 2 (PASS) and 3 (FAIL, one sentence), from `tools.py::create_fit_card`. Listing: *Denim Jacket — Light Wash, Cropped*, $42.00, poshmark, Wrangler, size S:
+```
+try 2: Scored this cropped Wrangler denim jacket on Poshmark for just $42.00, and I'm obsessed with how it pulls together a double-denim streetwear look. It also brings the ideal minimal aesthetic when layered over an oversized grey crewneck and wide-leg khaki trousers.
+
+try 3: Scored this vintage Wrangler light wash cropped denim jacket on Poshmark for $42.00, and I'm obsessed with how it looks paired with a white ribbed tank, baggy straight-leg jeans, and chunky white sneakers for a casual streetwear vibe. 👖✨
+```
+
+Criterion 5, try 1. Search step from `agent.py::run_agent` (the prices come from every returned listing, not just the first):
+```
+[2] search_listings (via MCP)
+      in:  description='vintage jacket', size=None, max_price=35.0
+      out: 10 items: Leather Belt — Brown, Braided, Bucket Hat — Reversible, Brown Plaid, Henley Long Sleeve — Washed Burgundy … +7 more
+      →    branch: 10 results (prices $12–$24) → selected_item = lst_014
 ```
 
 ---
@@ -232,15 +282,25 @@ that produced it:
      Look for a pattern. Three misses on the same tool is one problem, not
      three. -->
 
+Verdicts are against the targets in `criteria.md` as written in unit 3. None were revised.
+
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Matching query completes all three tools | 4 of 5 | **MET (4/5)** | PASS = `selected_item`, `outfit_suggestion` and `fit_card` all populated and `error` is None. Try 3 stopped in `suggest_outfit` with no outfit or card. 4 passes against a target of 4. |
+| 2 | Impossible query stops before tool 2 | 5 of 5 | **MET (5/5)** | PASS = 0 search results, `error` says what to change, and the trace has no `suggest_outfit`/`create_fit_card` step. All five matched. |
+| 3 | `selected_item` matches the item passed to `suggest_outfit` | 5 of 5 | **MISSED (2/5)** | PASS = the trace shows `suggest_outfit` received the same id, price and platform as `selected_item`. Tries 3 and 5 show `lst_004 ($45, poshmark)` on both sides. In tries 1, 2 and 4, `suggest_outfit` raised a 503 before its inputs were logged, so the run log can't show a match. Unverified isn't a pass. |
+| 4 | Fit card: 2–4 sentences, title, exact price, platform, nothing contradicted | 4 of 5 | **MISSED (2/5)** | Read each card against the listing. Tries 1 and 2 pass: 3 and 2 sentences, "Wrangler … denim jacket", "$42.00", "Poshmark", and nothing contradicted (Wrangler is the listing's real brand, "vintage" is one of its style tags). Try 3 has every fact right but is a single sentence; the criterion says 2–4. Tries 4 and 5 produced no card (503). |
+| 5 | Nothing returned over `max_price` | 5 of 5 | **MET (5/5)** | PASS = the most expensive of all returned listings ≤ $35. The trace computes min/max over every result: $12–$24 in all five tries. The query was chosen because 3 keyword matches cost more than $35, so the filter really had something to drop. |
 
 **Diagnoses**
+
+**The pattern: two misses, and one shared mechanism behind most of them.** Of the 8 FAIL cells, 7 are the same thing. The provider returned `503 UNAVAILABLE` ("high demand"), and `generate.py::generate` treated it as fatal. Its retry loop only retries a 429. Any other error, including a 503 that the message itself calls "usually temporary", goes straight to `raise ModelUnavailable`. The handler I added in Milestone 2 (`agent.py::_model_down`) then did its job and stopped the run politely. So the run didn't crash; it ended without trying again. **Place: the model call (the adapter around the tools), not a tool's logic, the branch, or the session.** The failures land on whichever tool happened to make the call: 7 in `suggest_outfit`, 7 in `create_fit_card`.
+
+- **Criterion 3 — MISSED, 2/5. Place: the model call, plus a gap in what my trace records.** Nothing in the run shows the session handing over the wrong item. Every try's search step chose `lst_004`, and both tries that logged `suggest_outfit`'s input show `lst_004 ($45, poshmark)`. The three failures are tries where `suggest_outfit` raised a 503. On that path `_model_down` logs the error but not the `new_item` that went in, so there is no evidence to score. Two mechanisms together: the 503 isn't retried, and my error-path trace step drops the inputs. To be honest about the target: in the code, `outfit_input_item` and the argument to `suggest_outfit` are the same variable, so this criterion can only catch a future regression. The target was easy, and missing it says more about my logging than about my session.
+- **Criterion 4 — MISSED, 2/5. Two places.** Tries 4 and 5: the model call again (503 in `create_fit_card`, so no card). Try 3: **the model's output.** The prompt in `tools.py::create_fit_card` says "2 to 4 sentences of prose", and the model wrote one long run-on sentence joined with ", and I'm obsessed with how it looks paired with…", then an emoji. My criterion says emojis don't count as sentences, so it's one. The tool passed the right facts; the prompt asks for a sentence count without checking it. Even without any 503s, this would have been 4/5. That just meets the target, and that's the only reason criterion 4 isn't purely a reliability problem.
+- **Criterion 1 — MET, but only just, and for the same reason.** The one FAIL (try 3) is a 503 in `suggest_outfit`. 4/5 meets the target. I wrote the 1-in-5 allowance for exactly this kind of API error, which held, but with no slack left.
+
+**Found while testing, not covered by any criterion:** criterion 5's query `vintage jacket under $35` selects a **Leather Belt** (`lst_014`) as the best match. So did `leather boots under $60` while I was triggering failures. `tools.py::search_listings` scores each wanted keyword independently, and ties go to the cheaper item. Every listing with "jacket" in its title costs more than $35. The only jacket under the limit, *Shacket — Olive Canvas* ($33), mentions "jacket" only in its description (1 point). The belt has `vintage` as a style tag (2 points), so the belt wins. Criterion 5 passes because it only checks price. No criterion checks that the selected item is the right *kind* of thing, which is the criterion I'd add next.
 
 
 
@@ -258,22 +318,71 @@ that produced it:
      the same length, your branch isn't working — and this is the fastest way
      anyone will ever find that out. -->
 
-**Happy path**
+Trace calls are in `agent.py::run_agent`, one `trace.step()` per step. Step 2 is the MCP call: `run_agent` → `mcp_client.call_tool("search_listings", …)` → `mcp_server.py::search_listings`.
+
+**Happy path.** From the before run, criterion 1, try 1 (`results/run_2026-10-13_2158_before.md`):
 
 ```
-
+[1] parse_query
+      in:  'vintage graphic tee under $30'
+      out: description='vintage graphic tee', size=None, max_price=30.0
+[2] search_listings (via MCP)
+      in:  description='vintage graphic tee', size=None, max_price=30.0
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+      →    branch: 10 results (prices $12–$26) → selected_item = lst_002
+[3] suggest_outfit
+      in:  new_item=lst_002 'Y2K Baby Tee — Butterfly Print' ($18, depop), wardrobe=10 items
+      out: Outfit 1: Pair the Y2K Baby Tee with the baggy straight-leg jeans, dark wash for a classic 2000s streetwear si…
+[4] create_fit_card
+      in:  outfit=<587 chars>, new_item=lst_002
+      out: scored this butterfly print Y2K baby tee on depop for just $18.00 and I'm obsessed. paired it with baggy dark …
+      →    done
 ```
 
-**Empty search**
+**Empty search.** Two steps instead of four, because the branch stops it:
 
 ```
+$ python app.py ask 'designer ballgown size XXS under $5' --trace
+[1] parse_query
+      in:  'designer ballgown size XXS under $5'
+      out: description='designer ballgown', size='XXS', max_price=5.0
+[2] search_listings (via MCP)
+      in:  description='designer ballgown', size='XXS', max_price=5.0
+      out: [] (empty)
+      →    branch: empty → stop, suggest_outfit NOT called
 
+  No listings matched 'designer ballgown' (size XXS, under $5). To find something, try: drop the size or try a neighbouring one (e.g. S/M, M/L); raise the price limit above $5; use fewer or more common words (e.g. 'graphic tee', 'denim jacket', 'boots').
+
+0 model calls this session
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+**Failure modes, triggered on purpose (Milestone 2)**
+
+| Failure | How I triggered it | What happened first | Handler now |
+|---|---|---|---|
+| Empty search | `python app.py ask 'designer ballgown size XXS under $5'` | Already handled in unit 3: stops after search, names each filter to loosen | unchanged, `agent.py::_no_results_message` |
+| Empty wardrobe | `python app.py ask 'denim jacket under $50' --empty-wardrobe` | Already handled: `suggest_outfit` returns general advice ("layer the cropped light wash denim jacket over an oversized graphic black hoodie…"), card still written | unchanged, `tools.py::suggest_outfit` empty branch |
+| Model unavailable | one character of the key changed, query not asked before (`leather boots under $60`) | **Not handled by the agent.** `run_agent` raised `ModelUnavailable` and never returned. The only reason the user saw `ModelUnavailable: The model rejected your API key…` instead of a traceback was `app.py`'s catch-all. The item the search found was thrown away, and `run_eval.py` would have logged a crash. | `agent.py::_model_down`, see below |
+
+Model unavailable, after the handler:
+
+```
+[2] search_listings (via MCP)
+      in:  description='leather boots', size=None, max_price=60.0
+      out: 4 items: Leather Belt — Brown, Braided, Mini Shoulder Bag — Tan Leather, Suede Chelsea Boots — Tan … +1 more
+      →    branch: 4 results → selected_item = first result
+[3] suggest_outfit
+      out: ModelUnavailable: The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh k…
+      →    model unreachable, stopping
+
+  Found Leather Belt — Brown, Braided — $12.00 on thredUp, but the styling model couldn't be reached, so there's no outfit or fit card this time. The model rejected your API key. Check GEMINI_API_KEY in your .env file, or create a fresh key at aistudio.google.com. The search itself worked, so once that's sorted, run the same request again.
+```
+
+I also added a handler for a failure the MCP move introduced: the search server not starting. I forced it by pointing `mcp_client.SERVER` at a file that doesn't exist. Output: `The listings search couldn't be reached, so nothing was searched. Try again in a moment; if it keeps happening, run 'python mcp_client.py' to check the search server starts.`
+
+The model-unavailable handler then fired for real, without me forcing it. The provider was overloaded during testing and returned `503 UNAVAILABLE`, and every one of those 14 calls in the before run ended in this message instead of a crash. That's also where the diagnosis above comes from.
+
+**On the MCP move:** `search_listings` is registered in `mcp_server.py` with `@mcp.tool()`, with typed inputs (`description: str`, `size: str | None`, `max_price: float | None`) and a description written for an agent that can't see the code: units (US dollars, inclusive), the size-matching rule, every field returned, and the empty case (`[]`, never null or an error). In `agent.py::run_agent`, the direct `search_listings(...)` call became `call_tool("search_listings", {...})`, and the direct import was removed. **Nothing behaved differently:** `call_tool(...) == search_listings(...)` returned `True` for `vintage graphic tee` under $30, the impossible query still came back as `[]`, and the full query gave the same item and output as the unit 3 Sample Run. The only visible change is speed. Every call starts a server process, so search went from 0.5 ms (direct) to 539 ms (over MCP), measured on the same query.
 
 
 
