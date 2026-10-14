@@ -179,6 +179,18 @@ Scored these vintage Levi's 501 jeans on Depop for $38.00 and they honestly fit 
 - *What came back:* The caption said *"knew I had to **list** it on depop"*. The prompt only said `Platform: depop`, so the model read the platform as where the user was selling the item, not where they bought it.
 - *What I changed:* I changed the prompt to say the user "just bought and are wearing" the item, and relabelled the fields `Price they paid:` and `Where they bought it:`. Later runs say "Scored this … on Depop for just $18.00", which matches criterion 4.
 
+**Unit 4 — Moment 3**
+
+- *What I asked for:* I worked through the unit 4 milestones together with Claude Code: registering the MCP tool, triggering the failures, choosing scenarios, and running and scoring both evals.
+- *What came back:* We triggered the three failures before writing any handlers. That showed the bad-key case only *looked* handled: `run_agent` raised `ModelUnavailable`, `app.py`'s catch-all printed it, and the item the search had found was lost. While planning the scenarios, Claude also pointed out that `vintage graphic tee under $30` couldn't test criterion 5, because no matching listing costs more than $30. It would pass even with the price filter deleted.
+- *What I changed:* We added `_model_down` in `run_agent`, so the agent returns a message and keeps the item. For criterion 5 we switched to `vintage jacket under $35`, where 3 keyword matches are over the limit.
+
+**Unit 4 — Moment 4**
+
+- *What I asked for:* Help scoring the before run against my criteria.
+- *What came back:* In three criterion 3 tries, `suggest_outfit` hit a 503 before its inputs were logged. The code makes a mismatch almost impossible, so marking them PASS was tempting. Claude argued they had to be FAIL, because the run log has no evidence either way.
+- *What I changed:* I kept the strict verdict, MISSED (2/5), and put both sides into the diagnosis. The logging gap went under What's Still Broken instead of being counted as a pass.
+
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
      Don't fill these in during unit 3.
