@@ -328,11 +328,17 @@ def generate(
                 or "resource" in message and "exhaust" in message
                 or "rate" in message and "limit" in message
             )
-            if not rate_limited:
+            # Unit 4 improvement: a 503 "high demand" is temporary, like a 429.
+            # In the before run it ended 14 of 43 calls with no retry at all.
+            overloaded = "503" in message or "unavailable" in message or "overloaded" in message
+            if not (rate_limited or overloaded):
+                raise ModelUnavailable(_explain(exc)) from exc
+            if overloaded and attempt == config.MAX_RETRIES - 1:
                 raise ModelUnavailable(_explain(exc)) from exc
             backoff = _retry_delay(exc, attempt)
+            kind = "model overloaded (503)" if overloaded else "rate limit"
             print(
-                f"  [rate limit] service pushed back. Waiting {backoff:.0f}s "
+                f"  [{kind}] service pushed back. Waiting {backoff:.0f}s "
                 f"(attempt {attempt + 1} of {config.MAX_RETRIES}). This is "
                 f"the limiter doing its job, not a bug.",
                 file=sys.stderr,
